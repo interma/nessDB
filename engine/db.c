@@ -8,6 +8,7 @@
 #include "db.h"
 #include "index.h"
 #include "buffer.h"
+#include "shrink.h"
 #include "debug.h"
 #include "xmalloc.h"
 
@@ -15,6 +16,7 @@ struct nessdb {
 	struct index *idx;
 	struct stats *stats;
 	struct iter *iter;
+	struct shrink *shr;
 };
 
 struct nessdb *db_open(const char *basedir)
@@ -26,6 +28,7 @@ struct nessdb *db_open(const char *basedir)
 	db->stats->STATS_START_TIME = time(NULL);
 	db->idx = index_new(basedir, db->stats);
 	db->iter = xcalloc(1, sizeof(struct iter));
+	db->shr = shrink_new(db->idx);
 
 	return db;
 }
@@ -113,7 +116,7 @@ void db_remove(struct nessdb *db, struct slice *sk)
 
 void db_shrink(struct nessdb *db)
 {
-	(void)db;
+	shrink_do(db->shr);
 }
 
 void db_close(struct nessdb *db)

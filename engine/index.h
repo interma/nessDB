@@ -22,9 +22,15 @@ struct parking {
 
 struct index{
 	int fd;
-	int lsn;
+	int fd_slave;
+
 	int read_fd;
+	int read_fd_slave;
+
+	int lsn;
 	uint64_t db_alloc;
+
+	char flag;
 	char tower_file[NESSDB_PATH_SIZE];
 	char path[NESSDB_PATH_SIZE];
 

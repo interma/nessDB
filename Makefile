@@ -14,6 +14,7 @@ LIB_OBJS = \
 	./engine/bloom.o\
 	./engine/quicklz.o\
 	./engine/block.o\
+	./engine/shrink.o\
 	./engine/db.o
 
 TEST = \

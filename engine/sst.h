@@ -9,6 +9,7 @@
 #define ITEM_SIZE (sizeof(struct sst_item))
 
 struct ol_pair {
+	char flag;
 	uint64_t offset;
 	uint32_t vlen;
 };

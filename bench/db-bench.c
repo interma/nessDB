@@ -131,6 +131,11 @@ void _write_test(long int count, int r)
 
 	start = get_ustime_sec();
 	for (i = 0; i < count; i++) {
+		if (i == 20000) {
+			__DEBUG("-----------------------------db to shrink........");
+			db_shrink(db);
+		}
+
 		if (r)
 			_random_key(key, KSIZE);
 		else

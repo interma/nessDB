@@ -69,8 +69,10 @@
 #define BLOCK_GAP (256)
 #define NESSDB_MAX_KEY_SIZE (36) 
 
+#define DB_MAGIC (20121212)
 #define NESSDB_SST_EXT (".SST")
 #define NESSDB_DB ("ness.DB")
+#define NESSDB_DB_SLAVE ("ness.SLAVE")
 
 struct sst_item {
 	char data[NESSDB_MAX_KEY_SIZE];

@@ -12,7 +12,6 @@
 #include "debug.h"
 #include "xmalloc.h"
 
-#define DB_MAGIC (20121212)
 #define NESSDB_TOWER_EXT (".TOWER")
 
 void _make_towername(struct index *idx, int lsn)
@@ -138,6 +137,8 @@ char *index_read_data(struct index *idx, struct ol_pair *pair)
 {
 	int res;
 	char *data = NULL;
+
+
 
 	if (pair->offset > 0UL && pair->vlen > 0) {
 		char iscompress = 0;
@@ -278,6 +279,8 @@ int index_add(struct index *idx, struct slice *sk, struct slice *sv)
 	offset = idx->db_alloc;
 	memset(&item, 0, ITEM_SIZE);
 	memcpy(item.data, sk->data, sk->len);
+	item.in = idx->flag;
+
 	if (sv) {
 		idx->stats->STATS_WRITES++;
 
