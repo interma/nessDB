@@ -5,7 +5,9 @@
 
 struct shrink {
 	int fd;
+	int async;
 	struct index *idx;
+	pthread_attr_t attr;
 };
 
 struct shrink *shrink_new(struct index *idx);

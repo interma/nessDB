@@ -264,8 +264,8 @@ struct sst *sst_new(const char *file, struct stats *stats)
 	sst->bf = bloom_new(sst->header.bitset);
 
 
-	sst->lock = xmalloc(sizeof(pthread_mutex_t));
-	pthread_mutex_init(sst->lock, NULL);
+	sst->w_lock = xmalloc(sizeof(pthread_mutex_t));
+	pthread_mutex_init(sst->w_lock, NULL);
 
 	return sst;
 
@@ -412,9 +412,9 @@ ERR:
 
 void sst_free(struct sst *sst)
 {
-	pthread_mutex_unlock(sst->lock);
-	pthread_mutex_destroy(sst->lock);
-	xfree(sst->lock);
+	pthread_mutex_unlock(sst->w_lock);
+	pthread_mutex_destroy(sst->w_lock);
+	xfree(sst->w_lock);
 
 	if (sst->fd > 0)
 		close(sst->fd);

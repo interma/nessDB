@@ -43,7 +43,8 @@ struct index{
 	qlz_state_decompress destate;
 
 	pthread_attr_t attr;
-	pthread_mutex_t *merge_lock;
+	pthread_mutex_t *m_lock;
+	pthread_mutex_t *w_lock;
 };
 
 struct index *index_new(const char *path, struct stats *stats);

@@ -36,7 +36,7 @@ void *_merge_job(void *arg)
 	struct sst *sst;
 	struct index *idx = (struct index*)arg;
 
-	pthread_mutex_lock(idx->merge_lock);
+	pthread_mutex_lock(idx->m_lock);
 
 	sst = idx->park.merging_sst;
 	lsn = idx->park.lsn;
@@ -45,7 +45,10 @@ void *_merge_job(void *arg)
 	items = sst_in_one(sst, &c);
 	for (i = 0; i < c; i++) {
 		node = meta_get(idx->meta, items[i].data);
+
+		pthread_mutex_lock(node->sst->w_lock);
 		sst_add(node->sst, &items[i]);
+		pthread_mutex_unlock(node->sst->w_lock);
 	}
 	xfree(items);
 
@@ -56,7 +59,7 @@ void *_merge_job(void *arg)
 	idx->park.merging_sst = NULL;
 	sst_free(sst);
 
-	pthread_mutex_unlock(idx->merge_lock);
+	pthread_mutex_unlock(idx->m_lock);
 
 	if (async) {
 		pthread_detach(pthread_self());
@@ -96,11 +99,11 @@ void _build_tower(struct index *idx)
 		lsn = (max - i + 1);
 		_make_towername(idx, lsn);
 		sst = sst_new(idx->tower_file, idx->stats);
-		pthread_mutex_lock(idx->merge_lock);
+		pthread_mutex_lock(idx->m_lock);
 		idx->park.lsn = lsn;
 		idx->park.async = 0;
 		idx->park.merging_sst = sst;
-		pthread_mutex_unlock(idx->merge_lock);
+		pthread_mutex_unlock(idx->m_lock);
 		_merge_job(idx);
 	}
 }
@@ -108,11 +111,11 @@ void _build_tower(struct index *idx)
 void _check(struct index *idx)
 {
 	if (idx->sst->willfull) {
-		pthread_mutex_lock(idx->merge_lock);
+		pthread_mutex_lock(idx->m_lock);
 		idx->park.lsn = idx->lsn;
 		idx->park.async = 1;
 		idx->park.merging_sst = idx->sst;
-		pthread_mutex_unlock(idx->merge_lock);
+		pthread_mutex_unlock(idx->m_lock);
 
 		pthread_t tid;
 		pthread_create(&tid, &idx->attr, _merge_job, idx);
@@ -136,9 +139,13 @@ uint64_t _wasted(struct index *idx)
 char *index_read_data(struct index *idx, struct ol_pair *pair)
 {
 	int res;
+	int fd;
+	int pos = 0;
 	char *data = NULL;
 
-
+	/* Get the right fd when shrink */
+	fd = (pair->flag == idx->flag ? 
+			idx->read_fd : idx->read_fd_slave);
 
 	if (pair->offset > 0UL && pair->vlen > 0) {
 		char iscompress = 0;
@@ -146,28 +153,30 @@ char *index_read_data(struct index *idx, struct ol_pair *pair)
 		uint16_t db_crc = 0;
 		char *dest = NULL;
 
-		n_lseek(idx->read_fd, pair->offset, SEEK_SET);
+		pos = pair->offset;
 
 		/* read compress flag */
-		res = read(idx->read_fd, &iscompress, sizeof(char));
+		res = pread(fd, &iscompress, sizeof(char), pos);
 		if (res == -1) {
 			__ERROR("read iscompress flag error");
 
 			goto RET;
 		}
+		pos += sizeof(char);
 
 		/* read crc flag */
-		res = read(idx->read_fd, &crc, sizeof(crc));
+		res = pread(fd, &crc, sizeof(crc), pos);
 		if (res == -1) {
 			__ERROR("read crc error #%d", 
 					crc);
 
 			goto RET;
 		}
+		pos += sizeof(crc);
 
 		/* read data */
 		data = xcalloc(1, pair->vlen + 1);
-		res = read(idx->read_fd, data, pair->vlen);
+		res = pread(fd, data, pair->vlen, pos);
 		if (res == -1) {
 			__ERROR("read data error");
 
@@ -231,16 +240,29 @@ struct index *index_new(const char *path, struct stats *stats)
 	idx->read_fd = n_open(db_name, N_OPEN_FLAGS);
 	idx->db_alloc = n_lseek(idx->fd, 0, SEEK_END);
 
-	/* DB wasted ratio */
+	/* 
+	 * DB wasted ratio 
+	 */
 	stats->STATS_DB_WASTED = (double) (_wasted(idx)/idx->db_alloc);
 
 	memset(&idx->enstate, 0, sizeof(qlz_state_compress));
 	memset(&idx->destate, 0, sizeof(qlz_state_decompress));
 
-	idx->merge_lock = xmalloc(sizeof(pthread_mutex_t));
-	pthread_mutex_init(idx->merge_lock, NULL);
+	/* 
+	 * Merge lock
+	 */
+	idx->m_lock = xmalloc(sizeof(pthread_mutex_t));
+	pthread_mutex_init(idx->m_lock, NULL);
 
-	/* build tower */
+	/*
+	 * Data write lock
+	 */
+	idx->w_lock = xmalloc(sizeof(pthread_mutex_t));
+	pthread_mutex_init(idx->w_lock, NULL);
+
+	/* 
+	 * Build tower 
+	 */
 	_build_tower(idx);
 
 	/* new tower file */
@@ -313,11 +335,13 @@ int index_add(struct index *idx, struct slice *sk, struct slice *sv)
 		buff_len = idx->buf->NUL;
 		line = buffer_detach(idx->buf);
 
+		pthread_mutex_lock(idx->w_lock);
 		ret = n_pwrite(idx->fd, line, buff_len, idx->db_alloc);
 		if (ret == -1) 
 			__PANIC("write db error");
 
 		idx->db_alloc += buff_len;
+		pthread_mutex_unlock(idx->w_lock);
 
 		item.offset = offset;
 		item.vlen = val_len;
@@ -403,8 +427,8 @@ void _flush_index(struct index *idx)
 {
 	__DEBUG("begin to flush TOWER to disk...");
 
-	pthread_mutex_lock(idx->merge_lock);
-	pthread_mutex_unlock(idx->merge_lock);
+	pthread_mutex_lock(idx->m_lock);
+	pthread_mutex_unlock(idx->m_lock);
 
 	/* merge TOWER to SST */
 	_build_tower(idx);
@@ -416,9 +440,13 @@ void index_free(struct index *idx)
 	meta_free(idx->meta);
 	buffer_free(idx->buf);
 
-	pthread_mutex_unlock(idx->merge_lock);
-	pthread_mutex_destroy(idx->merge_lock);
-	xfree(idx->merge_lock);
+	pthread_mutex_unlock(idx->m_lock);
+	pthread_mutex_destroy(idx->m_lock);
+	xfree(idx->m_lock);
+
+	pthread_mutex_unlock(idx->w_lock);
+	pthread_mutex_destroy(idx->w_lock);
+	xfree(idx->w_lock);
 
 	if (idx->fd > 0)
 		fsync(idx->fd);

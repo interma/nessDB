@@ -233,7 +233,10 @@ struct meta_node *meta_get(struct meta *meta, char *key)
 		node = &meta->nodes[i - 1];
 
 	if (node->sst->willfull) {
+		pthread_mutex_lock(node->sst->w_lock);
 		_split_sst(meta, node);
+		pthread_mutex_unlock(node->sst->w_lock);
+
 		node = meta_get(meta, key);
 	}
 
