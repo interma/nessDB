@@ -265,12 +265,19 @@ int index_add(struct index *idx, struct slice *sk, struct slice *sv)
 	char *line;
 	struct sst_item item;
 
-	if (sk->len >= NESSDB_MAX_KEY_SIZE || (sv && sv->len > NESSDB_MAX_VAL_SIZE)) {
-		__ERROR("key or value is too long...#%d:%d", 
-				NESSDB_MAX_KEY_SIZE, 
-				NESSDB_MAX_VAL_SIZE);
+	if (sk->len >= NESSDB_MAX_KEY_SIZE || 
+			sk->len <0) {
+		__ERROR("key error...#%d", 
+				sk->len);
 
 		return 0;
+	}
+
+	if (sv) {
+		if (sv->len > NESSDB_MAX_VAL_SIZE ||
+				sv->len < 0)
+			__ERROR("value error...#%d", 
+					sv->len);
 	}
 
 	/* checking */
@@ -327,9 +334,10 @@ int index_get(struct index *idx, struct slice *sk, struct slice *sv)
 	struct ol_pair pair;
 	struct meta_node *node;
 
-	if (sk->len >= NESSDB_MAX_KEY_SIZE) {
-		__ERROR("key length big than MAX#%d", 
-				NESSDB_MAX_KEY_SIZE);
+	if (sk->len >= NESSDB_MAX_KEY_SIZE ||
+			sk->len < 0) {
+		__ERROR("key length error#%d", 
+				sk->len);
 
 		return 0;
 	}
@@ -378,12 +386,14 @@ RET:
 
 int index_remove(struct index *idx, struct slice *sk)
 {
-	if (sk->len >= NESSDB_MAX_KEY_SIZE) {
-		__ERROR("key length big than MAX#%d", 
-				NESSDB_MAX_KEY_SIZE);
+	if (sk->len >= NESSDB_MAX_KEY_SIZE ||
+			sk->len < 0) {
+		__ERROR("key length error#%d", 
+				sk->len);
 
 		return 0;
 	}
+
 
 	idx->stats->STATS_REMOVES++;
 	return index_add(idx, sk, NULL);
