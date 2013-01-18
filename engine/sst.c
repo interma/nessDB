@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, BohuTANG <overred.shuttler at gmail dot com>
+ * Copyright (c) 2012-2013, BohuTANG <overred.shuttler at gmail dot com>
  * All rights reserved.
  * Code is licensed with GPL. See COPYING.GPL file.
  *
@@ -25,15 +25,15 @@ void _insertion_sort(struct sst *sst, struct sst_item *item, int len)
 				break;
 
 			else if (cmp == 0) {
-				/* Cover the old version */
-				if (cmp == 0) {
-					/* Add removed-hole to wasted */
-					if ((item[j].opt&1) &&
-							((v.opt&1) == 0))
-						sst->header.wasted += item[j].vlen;
+				/* 
+				 * Cover all of the old version when key is same in array
+				 */
+				if ((item[j].opt&1) &&
+						((v.opt&1) == 0))
+					sst->header.wasted += item[j].vlen;
 
-					memcpy(&item[j], &v, ITEM_SIZE); 
-				}
+				memcpy(&item[j], &v, ITEM_SIZE); 
+
 				continue;
 			}
 
@@ -52,9 +52,22 @@ int _merge_sort(struct sst *sst, struct sst_item *c,
 	for (i = 0; (m < alen) && (n < blen);) {
 		int cmp;
 
+		/* 
+		 * Deduplicate data from b_old
+		 */
+		if (n > 0) {
+			cmp = strcmp(b_old[n].data, b_old[n - 1].data);
+			if (cmp == 0) {
+				n++;
+				continue;
+			}
+		}
+
 		cmp = strcmp(a_new[m].data, b_old[n].data);
 		if (cmp == 0) {
-			/* Add removed-hole to wasted */
+			/* 
+			 * Add removed-hole to wasted
+			 */
 			if ((b_old[n].opt&1) && 
 					((a_new[m].opt&1) == 0))
 				sst->header.wasted += b_old[n].vlen;
@@ -83,12 +96,12 @@ int _merge_sort(struct sst *sst, struct sst_item *c,
 /* 
  * Calc level's offset of the SST file 
  */
-int _pos_calc(int level)
+uint32_t _pos_calc(int level)
 {
 	int i = 0;
-	int off = HEADER_SIZE;
+	uint32_t off = HEADER_SIZE;
 	
-	while(i < level) {
+	while (i < level) {
 		off += (pow(LEVEL_BASE, i) * L0_SIZE);
 		i++;
 	}
@@ -105,18 +118,19 @@ void _update_header(struct sst *sst)
 		return;
 }
 
-int _level_max(int level, int gap)
+uint32_t _level_max(int level, int gap)
 {
-	return (int)(pow(LEVEL_BASE, level) * L0_SIZE / ITEM_SIZE - gap);
+	return (uint32_t)(pow(LEVEL_BASE, level) * L0_SIZE / ITEM_SIZE - gap);
 }
 
-void sst_dump(struct sst *sst) {
+void sst_dump(struct sst *sst)
+{
 	int i;
 
 	__DEBUG("**%06d.SST dump:", 
 			sst->fd);
 
-	for(i = 0; i< (int)MAX_LEVEL; i++) {
+	for (i = 0; i < (int)MAX_LEVEL; i++) {
 		printf("\t\t-L#%d---count#%d, max-count:%d\n",
 				i,
 				sst->header.count[i],
@@ -125,7 +139,7 @@ void sst_dump(struct sst *sst) {
 	printf("\n");
 }
 
-struct sst_item * read_one_level(struct sst *sst, int level, int readc, int issort)
+struct sst_item *read_one_level(struct sst *sst, int level, uint32_t readc, int issort)
 {
 	int res;
 	int c = sst->header.count[level];
@@ -143,7 +157,7 @@ struct sst_item * read_one_level(struct sst *sst, int level, int readc, int isso
 	return L;
 }
 
-void write_one_level(struct sst *sst, struct sst_item *L, int count, int level)
+void write_one_level(struct sst *sst, struct sst_item *L, uint32_t count, int level)
 {
 	int res;
 
@@ -153,23 +167,25 @@ void write_one_level(struct sst *sst, struct sst_item *L, int count, int level)
 		__PANIC("write to one level....");
 }
 
-void  _merge_to_next(struct sst *sst, int level, int mergec) 
+void  _merge_to_next(struct sst *sst, int level) 
 {
 	int nxt_level = level + 1;
-	int c2 = sst->header.count[nxt_level];
-	int lmerge_c = mergec + c2;
-	struct sst_item *L = read_one_level(sst, level, mergec, 1);
+	uint32_t c1 = sst->header.count[level];
+	uint32_t c2 = sst->header.count[nxt_level];
+	uint32_t lmerge_c = c1 + c2;
+	struct sst_item *L = read_one_level(sst, level, c1, 1);
 	struct sst_item *L_nxt = read_one_level(sst, nxt_level, c2, 1);
 	struct sst_item *L_merge = xcalloc(lmerge_c + 1, ITEM_SIZE);
 
-	lmerge_c = _merge_sort(sst, L_merge, L, mergec, L_nxt, c2);
+	lmerge_c = _merge_sort(sst, L_merge, L, c1, L_nxt, c2);
 	write_one_level(sst, L_merge, lmerge_c, nxt_level);
 
-	/* Update count */
-	sst->header.count[level] -= mergec;
+	sst->header.count[level] = 0;
 	sst->header.count[nxt_level] = lmerge_c;
 
-	/* update full flag */
+	/* 
+	 * Update full flag when there is enough size
+	 */
 	sst->header.full[level] = 0;
 	if (lmerge_c >= _level_max(nxt_level, 3))
 		sst->header.full[nxt_level] = 1;
@@ -190,28 +206,22 @@ void _check_merge(struct sst *sst)
 
 	for (i = MAX_LEVEL - 2; i >= 0; i--) {
 		if (sst->header.full[i]) {
-			/* Level-i and Level-(i+1) all is full */
+			/* 
+			 * Level-i and Level-(i+1) all is full
+			 */
 			if (sst->header.full[i + 1] == 0) {
 				int c = sst->header.count[i];
 				int nxt_c = sst->header.count[i + 1];
 				int nxt_max = _level_max(i + 1, 3);
 				int delta = nxt_max - (c + nxt_c);
 
-				/* Merge full level to next level */
-				if (delta >= 0) {
-					_merge_to_next(sst, i, c);
-				} else {
-					/*
-					 * Merge the delta to next level 
-					 * If next level holes less than (level<<1)*16
-					 * Mark the next level is full
-					 */
-					delta = nxt_max - nxt_c;
-					if (delta > (i<<1) * 16  )
-						_merge_to_next(sst, i, delta);
-					else
-						sst->header.full[i + 1] = 1;
-				}
+				/* 
+				 * Merge full level to next level
+				 */
+				if (delta >= 0)
+					_merge_to_next(sst, i);
+				else 
+					sst->header.full[i + 1] = 1;
 			}
 		}
 	}
@@ -248,7 +258,7 @@ struct sst *sst_new(const char *file, struct stats *stats)
 	struct sst *sst = xcalloc(1, sizeof(struct sst));
 
 	sst->oneblk = xcalloc(BLOCK_GAP, ITEM_SIZE);
-	sst->blk= block_new(BLOCK0_COUNT);
+	sst->blk = block_new(BLOCK0_COUNT);
 
 	sst->fd = n_open(file, N_OPEN_FLAGS, 0644);
 	if (sst->fd > 0) {
@@ -282,13 +292,19 @@ int sst_add(struct sst *sst, struct sst_item *item)
 	int res;
 	int pos;
 
-	/* Bloom filter */
+	/* 
+	 * Bloom filter
+	 */
 	if (item->opt & 1)
 		bloom_add(sst->bf, item->data);
 
 	int klen = strlen(item->data);
+
 	pos = HEADER_SIZE + sst->header.count[0] * ITEM_SIZE;
-	/* Swap max key */
+
+	/* 
+	 * Swap max key 
+	 */
 	cmp = strcmp(item->data, sst->header.max_key);
 	if (cmp > 0) { 
 		memset(sst->header.max_key, 0, NESSDB_MAX_KEY_SIZE);
@@ -302,7 +318,9 @@ int sst_add(struct sst *sst, struct sst_item *item)
 	sst->header.count[0]++;
 	_update_header(sst);
 
-	/* If L0 is full, to check */
+	/* 
+	 * If L0 is full, to check
+	 */
 	if (sst->header.count[0] >= _level_max(0, 1)) {
 		sst->header.full[0] = 1;
 		_check_merge(sst);
@@ -356,10 +374,12 @@ int sst_get(struct sst *sst, struct slice *sk, struct ol_pair *pair)
 {
 	int cmp;
 	int i = 0;
-	int c = sst->header.count[i];
+	uint32_t c = sst->header.count[i];
 	struct sst_item *L = read_one_level(sst, 0, c, 0);
 
-	/* level 0 */
+	/* 
+	 * Linear Search in level 0
+	 */
 	for (i = c - 1; i >= 0; i--) {
 		cmp = strcmp(sk->data, L[i].data);
 		if (cmp == 0) {
